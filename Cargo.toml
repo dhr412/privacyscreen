@@ -3,6 +3,10 @@ name = "privacyscreen"
 version = "1.0.0"
 edition = "2024"
 
+[[bin]]
+name = "privscrn"
+path = "src/privscrn.rs"
+
 [dependencies]
 winit = { version = "0.30", features = ["rwh_06", "x11"] }
 softbuffer = "0.4.8"
