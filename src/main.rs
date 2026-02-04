@@ -26,7 +26,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use x11::xlib::*;
 
 const FALL_OFF_POWER: f32 = 1.5;
-const MAX_ALPHA: f32 = 0.4; // edge opacity (0.0-1.0)
+const MAX_ALPHA: f32 = 0.35; // edge opacity (0.0-1.0)
 #[cfg(target_os = "linux")]
 const X11_WINDOW_OPACITY: f32 = 0.4;
 
