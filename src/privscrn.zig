@@ -1,9 +1,11 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const FALL_OFF_POWER: f32 = 1.5;
-const MAX_ALPHA: f32 = 0.4;
-const X11_WINDOW_OPACITY: f32 = 0.4;
+const Config = struct {
+    falloff: f32 = 4.0,
+    max_alpha: f32 = 0.6,
+    x11_opacity: f32 = 0.5,
+};
 
 const windows = if (builtin.os.tag == .windows) struct {
     const HWND = std.os.windows.HWND;
@@ -272,7 +274,7 @@ fn monitorEnumProc(hMonitor: windows.HMONITOR, _: windows.HDC, _: *windows.RECT,
     return windows.TRUE;
 }
 
-fn createVignetteWindows(allocator: std.mem.Allocator) !void {
+fn createVignetteWindows(allocator: std.mem.Allocator, config: Config) !void {
     if (builtin.os.tag == .windows) {
         const hInstance: ?windows.HINSTANCE = @ptrCast(std.os.windows.kernel32.GetModuleHandleW(null));
 
@@ -309,7 +311,7 @@ fn createVignetteWindows(allocator: std.mem.Allocator) !void {
                 null,
             ) orelse continue;
 
-            try drawVignetteWindows(hwnd, @intCast(mon.width), @intCast(mon.height), mon.x, mon.y);
+            try drawVignetteWindows(hwnd, @intCast(mon.width), @intCast(mon.height), mon.x, mon.y, config);
         }
 
         var msg: windows.MSG = undefined;
@@ -324,7 +326,7 @@ fn createVignetteWindows(allocator: std.mem.Allocator) !void {
     } else if (builtin.os.tag == .linux) {}
 }
 
-fn drawVignetteWindows(hwnd: windows.HWND, width: u32, height: u32, xpos: i32, ypos: i32) !void {
+fn drawVignetteWindows(hwnd: windows.HWND, width: u32, height: u32, xpos: i32, ypos: i32, config: Config) !void {
     const center_x = @as(f32, @floatFromInt(width)) / 2.0;
     const center_y = @as(f32, @floatFromInt(height)) / 2.0;
     const max_dist = @max(1.0, @sqrt(center_x * center_x + center_y * center_y));
@@ -359,8 +361,8 @@ fn drawVignetteWindows(hwnd: windows.HWND, width: u32, height: u32, xpos: i32, y
             const dx = @as(f32, @floatFromInt(x)) - center_x;
             const dy = @as(f32, @floatFromInt(y)) - center_y;
             const dist = @sqrt(dx * dx + dy * dy);
-            const factor = @min(1.0, std.math.pow(f32, dist / max_dist, FALL_OFF_POWER));
-            const alpha: u8 = @intFromFloat(factor * MAX_ALPHA * 255.0);
+            const factor = @min(1.0, std.math.pow(f32, dist / max_dist, config.falloff));
+            const alpha: u8 = @intFromFloat(factor * config.max_alpha * 255.0);
             const premul: u8 = 0;
             const bgra = (@as(u32, alpha) << 24) | (@as(u32, premul) << 16) |
                 (@as(u32, premul) << 8) | premul;
@@ -387,10 +389,87 @@ fn handleSignal(_: c_int) callconv(.C) void {
     should_quit.store(true, .monotonic);
 }
 
+fn printHelp() void {
+    std.debug.print(
+        \\Usage: privscrn [OPTIONS]
+        \\
+        \\Options:
+        \\  -f, --falloff <VALUE>       Fall-off power for vignette curve (default: 4.0)
+        \\  -o, --opacity <VALUE>       Maximum edge opacity, 0.0-1.0 (default: 0.6)
+        \\
+    , .{});
+    if (builtin.os.tag == .linux) {
+        std.debug.print(
+            \\  -x, --x11-opacity <VALUE>   X11 window opacity, 0.0-1.0 (default: 0.5)
+            \\  -h, --help                  Print this help message
+            \\
+        , .{});
+    } else {
+        std.debug.print(
+            \\  -h, --help                  Print this help message
+            \\
+        , .{});
+    }
+}
+
+fn parseArgs(allocator: std.mem.Allocator) !Config {
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
+
+    var config = Config{};
+
+    var i: usize = 1;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
+        if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+            printHelp();
+            std.process.exit(0);
+        } else if (std.mem.eql(u8, arg, "-f") or std.mem.eql(u8, arg, "--falloff")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("Error: --falloff requires a value\n", .{});
+                std.process.exit(1);
+            }
+            config.falloff = std.fmt.parseFloat(f32, args[i]) catch {
+                std.debug.print("Error: invalid falloff value: {s}\n", .{args[i]});
+                std.process.exit(1);
+            };
+        } else if (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--opacity")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("Error: --opacity requires a value\n", .{});
+                std.process.exit(1);
+            }
+            config.max_alpha = std.fmt.parseFloat(f32, args[i]) catch {
+                std.debug.print("Error: invalid opacity value: {s}\n", .{args[i]});
+                std.process.exit(1);
+            };
+        } else if (builtin.os.tag == .linux and (std.mem.eql(u8, arg, "-x") or std.mem.eql(u8, arg, "--x11-opacity"))) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("Error: --x11-opacity requires a value\n", .{});
+                std.process.exit(1);
+            }
+            config.x11_opacity = std.fmt.parseFloat(f32, args[i]) catch {
+                std.debug.print("Error: invalid x11-opacity value: {s}\n", .{args[i]});
+                std.process.exit(1);
+            };
+        } else {
+            std.debug.print("Error: unknown argument: {s}\n", .{arg});
+            printHelp();
+            std.process.exit(1);
+        }
+    }
+
+    return config;
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
+
+    const config = try parseArgs(allocator);
 
     if (builtin.os.tag == .windows) {
         _ = windows.SetConsoleCtrlHandler(windows.windowsCtrlHandler, 1);
@@ -404,5 +483,5 @@ pub fn main() !void {
         try std.posix.sigaction(std.posix.SIG.TERM, &act, null);
     }
 
-    try createVignetteWindows(allocator);
+    try createVignetteWindows(allocator, config);
 }
