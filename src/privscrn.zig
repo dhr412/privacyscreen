@@ -1,8 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const FALL_OFF_POWER: f32 = 1.0;
-const MAX_ALPHA: f32 = 0.35;
+const FALL_OFF_POWER: f32 = 1.5;
+const MAX_ALPHA: f32 = 0.4;
 const X11_WINDOW_OPACITY: f32 = 0.4;
 
 const windows = if (builtin.os.tag == .windows) struct {
@@ -17,6 +17,18 @@ const windows = if (builtin.os.tag == .windows) struct {
     const TRUE = std.os.windows.TRUE;
     const FALSE = std.os.windows.FALSE;
     const L = std.unicode.utf8ToUtf16LeStringLiteral;
+    const PM_REMOVE: UINT = 0x0001;
+
+    extern "kernel32" fn SetConsoleCtrlHandler(
+        HandlerRoutine: ?*const fn (dwCtrlType: u32) callconv(.winapi) i32,
+        Add: i32,
+    ) callconv(.winapi) i32;
+
+    fn windowsCtrlHandler(dwCtrlType: u32) callconv(.winapi) i32 {
+        _ = dwCtrlType;
+        should_quit.store(true, .monotonic);
+        return 1;
+    }
 
     extern "user32" fn CreateWindowExW(
         dwExStyle: u32,
@@ -35,7 +47,7 @@ const windows = if (builtin.os.tag == .windows) struct {
 
     extern "user32" fn RegisterClassExW(lpWndClass: *const WNDCLASSEXW) callconv(.winapi) u16;
     extern "user32" fn DefWindowProcW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(.winapi) LRESULT;
-    extern "user32" fn GetMessageW(lpMsg: *MSG, hWnd: ?HWND, wMsgFilterMin: UINT, wMsgFilterMax: UINT) callconv(.winapi) BOOL;
+    extern "user32" fn PeekMessageW(lpMsg: *MSG, hWnd: ?HWND, wMsgFilterMin: UINT, wMsgFilterMax: UINT, wRemoveMsg: UINT) callconv(.winapi) BOOL;
     extern "user32" fn TranslateMessage(lpMsg: *const MSG) callconv(.winapi) BOOL;
     extern "user32" fn DispatchMessageW(lpMsg: *const MSG) callconv(.winapi) LRESULT;
     extern "user32" fn PostQuitMessage(nExitCode: i32) callconv(.winapi) void;
@@ -301,11 +313,15 @@ fn createVignetteWindows(allocator: std.mem.Allocator) !void {
         }
 
         var msg: windows.MSG = undefined;
-        while (windows.GetMessageW(&msg, null, 0, 0) > 0) {
-            _ = windows.TranslateMessage(&msg);
-            _ = windows.DispatchMessageW(&msg);
+        while (!should_quit.load(.monotonic)) {
+            while (windows.PeekMessageW(&msg, null, 0, 0, windows.PM_REMOVE) != 0) {
+                if (msg.message == windows.WM_DESTROY) break;
+                _ = windows.TranslateMessage(&msg);
+                _ = windows.DispatchMessageW(&msg);
+            }
+            std.Thread.sleep(16 * std.time.ns_per_ms);
         }
-    }
+    } else if (builtin.os.tag == .linux) {}
 }
 
 fn drawVignetteWindows(hwnd: windows.HWND, width: u32, height: u32, xpos: i32, ypos: i32) !void {
@@ -365,10 +381,28 @@ fn drawVignetteWindows(hwnd: windows.HWND, width: u32, height: u32, xpos: i32, y
     _ = windows.UpdateLayeredWindow(hwnd, screen_dc, &pt_dst, &sz, mem_dc, &pt_src, 0, &blend, windows.ULW_ALPHA);
 }
 
+var should_quit = std.atomic.Value(bool).init(false);
+
+fn handleSignal(_: c_int) callconv(.C) void {
+    should_quit.store(true, .monotonic);
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
+
+    if (builtin.os.tag == .windows) {
+        _ = windows.SetConsoleCtrlHandler(windows.windowsCtrlHandler, 1);
+    } else if (builtin.os.tag == .linux) {
+        const act = std.posix.Sigaction{
+            .handler = .{ .handler = handleSignal },
+            .mask = std.posix.empty_sigset,
+            .flags = 0,
+        };
+        try std.posix.sigaction(std.posix.SIG.INT, &act, null);
+        try std.posix.sigaction(std.posix.SIG.TERM, &act, null);
+    }
 
     try createVignetteWindows(allocator);
 }
