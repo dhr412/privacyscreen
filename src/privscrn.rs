@@ -25,13 +25,13 @@ use clap::Parser;
 #[command(name = "privscrn")]
 #[command(about = "Privacy screen vignette overlay")]
 struct Cli {
-    #[arg(short, long, default_value = "2.0")]
+    #[arg(short, long, default_value = "4.0")]
     falloff: f32,
 
-    #[arg(short, long, default_value = "0.6")]
+    #[arg(short, long, default_value = "0.3")]
     opacity: f32,
 
-    #[arg(short = 's', long, default_value = "rectangle")]
+    #[arg(short = 's', long, default_value = "elliptical")]
     shape: Shape,
 
     #[arg(short = 't', long, default_value = "smootherstep")]

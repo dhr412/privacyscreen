@@ -46,10 +46,10 @@ Run the executable with optional flags to customize the effect:
 
 | Flag | Description | Default | Values |
 |------|-------------|---------|--------|
-| `-s, --shape` | The shape of the clear area | `rectangle` | `circle`, `rectangle`, `diamond`, `elliptical` |
+| `-s, --shape` | The shape of the clear area | `elliptical` | `circle`, `rectangle`, `diamond`, `elliptical` |
 | `-t, --type` | The mathematical function for the fall-off | `smootherstep` | `power`, `exponential`, `gaussian`, `smootherstep` |
-| `-o, --opacity` | Maximum opacity at the edges (0.0 to 1.0) | `0.6` | Any float |
-| `-f, --falloff` | Intensity/steepness of the fall-off curve | `2.0` | Any float |
+| `-o, --opacity` | Maximum opacity at the edges (0.0 to 1.0) | `0.3` | Any float |
+| `-f, --falloff` | Intensity/steepness of the fall-off curve | `4.0` | Any float |
 
 To exit the application, press `Ctrl+C` in the terminal or close the terminal window.
 

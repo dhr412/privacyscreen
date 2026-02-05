@@ -2,9 +2,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const Config = struct {
-    falloff: f32 = 2.0,
-    max_alpha: f32 = 0.6,
-    shape: Shape = .rectangle,
+    falloff: f32 = 4.0,
+    max_alpha: f32 = 0.3,
+    shape: Shape = .elliptical,
     falloff_type: FalloffType = .smootherstep,
 };
 
@@ -399,12 +399,14 @@ fn handleSignal(_: c_int) callconv(.C) void {
 
 fn printHelp() void {
     std.debug.print(
+        \\Privacy screen vignette overlay
+        \\
         \\Usage: privscrn [OPTIONS]
         \\
         \\Options:
         \\  -f, --falloff <VALUE>       Fall-off power for vignette curve (default: 4.0)
-        \\  -o, --opacity <VALUE>       Maximum edge opacity, 0.0-1.0 (default: 0.6)
-        \\  -s, --shape <VALUE>         Shape: circle, rectangle, diamond, elliptical (default: rectangle)
+        \\  -o, --opacity <VALUE>       Maximum edge opacity, 0.0-1.0 (default: 0.3)
+        \\  -s, --shape <VALUE>         Shape: circle, rectangle, diamond, elliptical (default: elliptical)
         \\  -t, --type <VALUE>          Falloff: power, exponential, gaussian, smoothers
         \\
     , .{});
