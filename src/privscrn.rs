@@ -106,7 +106,7 @@ fn calculate_vignette_factor(
             (dist_x + dist_y) / 2.0
         }
         Shape::Elliptical => {
-            let aspect = 1.6;
+            let aspect = 1.7;
             let dist_x = dx / center_x;
             let dist_y = dy / center_y;
             let dist = ((dist_x.powi(2) * aspect) + dist_y.powi(2)).sqrt();

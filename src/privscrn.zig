@@ -312,7 +312,7 @@ fn calculateVignetteFactor(dx: f32, dy: f32, center_x: f32, center_y: f32, confi
             break :blk (dist_x + dist_y) / 2.0;
         },
         .elliptical => blk: {
-            const aspect = 1.6;
+            const aspect = 1.7;
             const dist_x = dx / center_x;
             const dist_y = dy / center_y;
             const dist = @sqrt((dist_x * dist_x * aspect) + (dist_y * dist_y));
