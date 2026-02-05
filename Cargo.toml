@@ -8,7 +8,7 @@ name = "privscrn"
 path = "src/privscrn.rs"
 
 [dependencies]
-winit = { version = "0.30", features = ["rwh_06", "x11"] }
+winit = { version = "0.30", features = ["rwh_06"] }
 softbuffer = "0.4.8"
 clap = { version = "4.5", features = ["derive"] }
 ctrlc = "3.5.1"
@@ -18,5 +18,3 @@ windows = { version = "0.62.2", features = [
     "Win32_Graphics_Gdi",
     "Win32_UI_WindowsAndMessaging",
 ] }
-[target.'cfg(target_os = "linux")'.dependencies]
-x11 = "2.21"

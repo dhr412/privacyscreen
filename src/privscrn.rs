@@ -19,28 +19,41 @@ use windows::Win32::Graphics::Gdi::*;
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-#[cfg(target_os = "linux")]
-use winit::raw_window_handle::RawWindowHandle;
-#[cfg(target_os = "linux")]
-use x11::xlib::*;
-#[cfg(target_os = "linux")]
-use x11::xshape::*;
-
 use clap::Parser;
 
 #[derive(Parser)]
 #[command(name = "privscrn")]
 #[command(about = "Privacy screen vignette overlay")]
 struct Cli {
-    #[arg(short, long, default_value = "4.0")]
+    #[arg(short, long, default_value = "2.0")]
     falloff: f32,
 
     #[arg(short, long, default_value = "0.6")]
     opacity: f32,
 
-    #[cfg(target_os = "linux")]
-    #[arg(short = 'x', long, default_value = "0.4")]
-    x11_opacity: f32,
+    #[arg(short = 's', long, default_value = "rectangle")]
+    shape: Shape,
+
+    #[arg(short = 't', long, default_value = "smootherstep")]
+    falloff_type: FalloffType,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy)]
+#[clap(rename_all = "lowercase")]
+enum Shape {
+    Circle,
+    Rectangle,
+    Diamond,
+    Elliptical,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy)]
+#[clap(rename_all = "lowercase")]
+enum FalloffType {
+    Power,
+    Exponential,
+    Gaussian,
+    Smootherstep,
 }
 
 struct App {
@@ -49,8 +62,8 @@ struct App {
     created: bool,
     falloff: f32,
     max_alpha: f32,
-    #[cfg(target_os = "linux")]
-    x11_opacity: f32,
+    shape: Shape,
+    falloff_type: FalloffType,
 }
 
 impl Default for App {
@@ -59,10 +72,60 @@ impl Default for App {
             windows: Vec::new(),
             monitors: Vec::new(),
             created: false,
-            falloff: 4.0,
+            falloff: 2.0,
             max_alpha: 0.6,
-            #[cfg(target_os = "linux")]
-            x11_opacity: 0.4,
+            shape: Shape::Rectangle,
+            falloff_type: FalloffType::Smootherstep,
+        }
+    }
+}
+
+fn calculate_vignette_factor(
+    dx: f32,
+    dy: f32,
+    center_x: f32,
+    center_y: f32,
+    shape: Shape,
+    falloff_type: FalloffType,
+    falloff: f32,
+) -> f32 {
+    let normalized_dist = match shape {
+        Shape::Circle => {
+            let dist = (dx.powi(2) + dy.powi(2)).sqrt();
+            let max_dist = (center_x.powi(2) + center_y.powi(2)).sqrt();
+            dist / max_dist
+        }
+        Shape::Rectangle => {
+            let dist_x = dx.abs() / center_x;
+            let dist_y = dy.abs() / center_y;
+            dist_x.max(dist_y)
+        }
+        Shape::Diamond => {
+            let dist_x = dx.abs() / center_x;
+            let dist_y = dy.abs() / center_y;
+            (dist_x + dist_y) / 2.0
+        }
+        Shape::Elliptical => {
+            let aspect = 1.6;
+            let dist_x = dx / center_x;
+            let dist_y = dy / center_y;
+            let dist = ((dist_x.powi(2) * aspect) + dist_y.powi(2)).sqrt();
+            let max_dist = (aspect + 1.0).sqrt();
+            dist / max_dist
+        }
+    };
+
+    match falloff_type {
+        FalloffType::Power => normalized_dist.powf(falloff).min(1.0),
+        FalloffType::Exponential => {
+            let exp_max = falloff.exp() - 1.0;
+            ((falloff * normalized_dist).exp() - 1.0) / exp_max
+        }
+        FalloffType::Gaussian => 1.0 - (-falloff * normalized_dist.powi(2)).exp(),
+        FalloffType::Smootherstep => {
+            let t = normalized_dist.min(1.0);
+            let smootherstep = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+            smootherstep.powf(falloff)
         }
     }
 }
@@ -92,93 +155,6 @@ impl ApplicationHandler for App {
                 let height = size.height;
                 let center_x = width as f32 / 2.0;
                 let center_y = height as f32 / 2.0;
-                let max_dist = (center_x.powi(2) + center_y.powi(2)).sqrt().max(1.0);
-
-                #[cfg(target_os = "linux")]
-                {
-                    let context = softbuffer::Context::new(window).unwrap();
-                    let mut surface = softbuffer::Surface::new(&context, window).unwrap();
-                    surface
-                        .resize(width.try_into().unwrap(), height.try_into().unwrap())
-                        .unwrap();
-                    let mut buffer = surface.buffer_mut().unwrap();
-                    for y in 0..height {
-                        for x in 0..width {
-                            buffer[(y * width + x) as usize] = 0;
-                        }
-                    }
-                    buffer.present().unwrap();
-
-                    unsafe {
-                        let handle = window.window_handle().unwrap();
-                        let (display, xwin) = match handle.as_raw() {
-                            RawWindowHandle::Xlib(h) => (h.display as *mut Display, h.window),
-                            _ => panic!("Not an X11 window"),
-                        };
-
-                        let net_state = XInternAtom(display, "_NET_WM_STATE\0".as_ptr() as _, 0);
-                        let net_above =
-                            XInternAtom(display, "_NET_WM_STATE_ABOVE\0".as_ptr() as _, 0);
-                        let skip_taskbar =
-                            XInternAtom(display, "_NET_WM_STATE_SKIP_TASKBAR\0".as_ptr() as _, 0);
-                        let skip_pager =
-                            XInternAtom(display, "_NET_WM_STATE_SKIP_PAGER\0".as_ptr() as _, 0);
-
-                        let mut ev: XClientMessageEvent = std::mem::zeroed();
-                        ev.type_ = ClientMessage;
-                        ev.window = xwin;
-                        ev.message_type = net_state;
-                        ev.format = 32;
-
-                        *ev.data.l_mut().offset(0) = 1;
-                        *ev.data.l_mut().offset(1) = net_above as i64;
-                        *ev.data.l_mut().offset(2) = skip_taskbar as i64;
-                        *ev.data.l_mut().offset(3) = skip_pager as i64;
-
-                        XSendEvent(
-                            display,
-                            XDefaultRootWindow(display),
-                            0,
-                            SubstructureRedirectMask | SubstructureNotifyMask,
-                            &mut ev as *mut _ as _,
-                        );
-
-                        let net_opacity =
-                            XInternAtom(display, "_NET_WM_WINDOW_OPACITY\0".as_ptr() as _, 0);
-                        let opacity_val = (self.x11_opacity * 0xFFFFFFFFu64 as f32) as u32;
-                        XChangeProperty(
-                            display,
-                            xwin,
-                            net_opacity,
-                            XA_CARDINAL,
-                            32,
-                            PropModeReplace,
-                            &opacity_val as *const _ as _,
-                            1,
-                        );
-
-                        let region = XCreateRegion();
-                        let empty_rect = XRectangle {
-                            x: 0,
-                            y: 0,
-                            width: 0,
-                            height: 0,
-                        };
-                        XUnionRectWithRegion(&mut empty_rect, region, region);
-                        XShapeCombineRegion(
-                            display,
-                            xwin,
-                            ShapeInput as i32,
-                            0,
-                            0,
-                            region,
-                            ShapeSet as i32,
-                        );
-                        XDestroyRegion(region);
-
-                        XSync(display, 0);
-                    }
-                }
 
                 #[cfg(windows)]
                 {
@@ -248,8 +224,15 @@ impl ApplicationHandler for App {
                             for x in 0..width {
                                 let dx = x as f32 - center_x;
                                 let dy = y as f32 - center_y;
-                                let dist = (dx.powi(2) + dy.powi(2)).sqrt();
-                                let factor = (dist / max_dist).powf(self.falloff).min(1.0);
+                                let factor = calculate_vignette_factor(
+                                    dx,
+                                    dy,
+                                    center_x,
+                                    center_y,
+                                    self.shape,
+                                    self.falloff_type,
+                                    self.falloff,
+                                );
                                 let alpha: u8 = (factor * self.max_alpha * 255.0) as u8;
                                 let premul: u8 = 0;
                                 let bgra = ((alpha as u32) << 24)
@@ -310,6 +293,12 @@ impl ApplicationHandler for App {
 }
 
 fn main() {
+    #[cfg(not(windows))]
+    {
+        eprintln!("This application is only supported on Windows.");
+        std::process::exit(0);
+    }
+
     let cli = Cli::parse();
 
     ctrlc::set_handler(|| std::process::exit(0)).expect("Failed to set Ctrl+C handler");
@@ -319,8 +308,9 @@ fn main() {
     let mut app = App {
         falloff: cli.falloff,
         max_alpha: cli.opacity,
-        #[cfg(target_os = "linux")]
-        x11_opacity: cli.x11_opacity,
+        shape: cli.shape,
+        falloff_type: cli.falloff_type,
+
         ..Default::default()
     };
     event_loop.run_app(&mut app).unwrap();

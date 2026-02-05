@@ -16,9 +16,6 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag == .windows) {
         exe.linkSystemLibrary("gdi32");
         exe.linkSystemLibrary("user32");
-    } else if (target.result.os.tag == .linux) {
-        exe.linkSystemLibrary("X11");
-        exe.linkSystemLibrary("Xext");
     }
 
     b.installArtifact(exe);

@@ -2,9 +2,24 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const Config = struct {
-    falloff: f32 = 4.0,
+    falloff: f32 = 2.0,
     max_alpha: f32 = 0.6,
-    x11_opacity: f32 = 0.5,
+    shape: Shape = .rectangle,
+    falloff_type: FalloffType = .smootherstep,
+};
+
+const Shape = enum {
+    circle,
+    rectangle,
+    diamond,
+    elliptical,
+};
+
+const FalloffType = enum {
+    power,
+    exponential,
+    gaussian,
+    smootherstep,
 };
 
 const windows = if (builtin.os.tag == .windows) struct {
@@ -186,55 +201,6 @@ const windows = if (builtin.os.tag == .windows) struct {
     const ULW_ALPHA: u32 = 0x00000002;
 } else struct {};
 
-const linux = if (builtin.os.tag == .linux) struct {
-    const Display = opaque {};
-    const Window = c_ulong;
-    const Atom = c_ulong;
-    const XID = c_ulong;
-    const Region = *opaque {};
-
-    const XClientMessageEvent = extern struct {
-        type: i32,
-        serial: c_ulong,
-        send_event: i32,
-        display: *Display,
-        window: Window,
-        message_type: Atom,
-        format: i32,
-        data: extern union {
-            b: [20]u8,
-            s: [10]i16,
-            l: [5]i64,
-        },
-    };
-
-    const XRectangle = extern struct {
-        x: i16,
-        y: i16,
-        width: u16,
-        height: u16,
-    };
-
-    extern "X11" fn XOpenDisplay(display_name: ?[*:0]const u8) ?*Display;
-    extern "X11" fn XDefaultRootWindow(display: *Display) Window;
-    extern "X11" fn XInternAtom(display: *Display, atom_name: [*:0]const u8, only_if_exists: i32) Atom;
-    extern "X11" fn XSendEvent(display: *Display, w: Window, propagate: i32, event_mask: i64, event: *XClientMessageEvent) i32;
-    extern "X11" fn XChangeProperty(display: *Display, w: Window, property: Atom, type: Atom, format: i32, mode: i32, data: *const u32, nelements: i32) i32;
-    extern "X11" fn XSync(display: *Display, discard: i32) i32;
-    extern "X11" fn XCreateRegion() Region;
-    extern "X11" fn XUnionRectWithRegion(rect: *const XRectangle, src: Region, dest: Region) i32;
-    extern "X11" fn XDestroyRegion(r: Region) i32;
-    extern "Xext" fn XShapeCombineRegion(display: *Display, dest: Window, dest_kind: i32, x_off: i32, y_off: i32, region: Region, op: i32) void;
-
-    const XA_CARDINAL: Atom = 6;
-    const ClientMessage: i32 = 33;
-    const SubstructureRedirectMask: i64 = 1 << 20;
-    const SubstructureNotifyMask: i64 = 1 << 19;
-    const PropModeReplace: i32 = 0;
-    const ShapeInput: i32 = 2;
-    const ShapeSet: i32 = 0;
-} else struct {};
-
 fn windowProc(hWnd: windows.HWND, uMsg: windows.UINT, wParam: windows.WPARAM, lParam: windows.LPARAM) callconv(.winapi) windows.LRESULT {
     if (uMsg == windows.WM_DESTROY) {
         windows.PostQuitMessage(0);
@@ -275,61 +241,104 @@ fn monitorEnumProc(hMonitor: windows.HMONITOR, _: windows.HDC, _: *windows.RECT,
 }
 
 fn createVignetteWindows(allocator: std.mem.Allocator, config: Config) !void {
-    if (builtin.os.tag == .windows) {
-        const hInstance: ?windows.HINSTANCE = @ptrCast(std.os.windows.kernel32.GetModuleHandleW(null));
+    if (builtin.os.tag != .windows) {
+        @compileError("Only Windows is supported");
+    }
 
-        const wc = windows.WNDCLASSEXW{
-            .style = 0,
-            .lpfnWndProc = windowProc,
-            .hInstance = hInstance,
-            .lpszClassName = windows.L("VignetteWindow"),
-        };
+    const hInstance: ?windows.HINSTANCE = @ptrCast(std.os.windows.kernel32.GetModuleHandleW(null));
 
-        _ = windows.RegisterClassExW(&wc);
+    const wc = windows.WNDCLASSEXW{
+        .style = 0,
+        .lpfnWndProc = windowProc,
+        .hInstance = hInstance,
+        .lpszClassName = windows.L("VignetteWindow"),
+    };
 
-        var monitor_data = MonitorData{
-            .monitors = std.ArrayList(MonitorInfo).empty,
-            .allocator = allocator,
-        };
-        defer monitor_data.monitors.deinit(monitor_data.allocator);
+    _ = windows.RegisterClassExW(&wc);
 
-        _ = windows.EnumDisplayMonitors(null, null, monitorEnumProc, @intCast(@intFromPtr(&monitor_data)));
+    var monitor_data = MonitorData{
+        .monitors = std.ArrayList(MonitorInfo).empty,
+        .allocator = allocator,
+    };
+    defer monitor_data.monitors.deinit(monitor_data.allocator);
 
-        for (monitor_data.monitors.items) |mon| {
-            const hwnd = windows.CreateWindowExW(
-                windows.WS_EX_LAYERED | windows.WS_EX_TRANSPARENT | windows.WS_EX_TOOLWINDOW | windows.WS_EX_TOPMOST,
-                windows.L("VignetteWindow"),
-                windows.L("Vignette"),
-                windows.WS_POPUP | windows.WS_VISIBLE,
-                mon.x,
-                mon.y,
-                mon.width,
-                mon.height,
-                null,
-                null,
-                hInstance,
-                null,
-            ) orelse continue;
+    _ = windows.EnumDisplayMonitors(null, null, monitorEnumProc, @intCast(@intFromPtr(&monitor_data)));
 
-            try drawVignetteWindows(hwnd, @intCast(mon.width), @intCast(mon.height), mon.x, mon.y, config);
+    for (monitor_data.monitors.items) |mon| {
+        const hwnd = windows.CreateWindowExW(
+            windows.WS_EX_LAYERED | windows.WS_EX_TRANSPARENT | windows.WS_EX_TOOLWINDOW | windows.WS_EX_TOPMOST,
+            windows.L("VignetteWindow"),
+            windows.L("Vignette"),
+            windows.WS_POPUP | windows.WS_VISIBLE,
+            mon.x,
+            mon.y,
+            mon.width,
+            mon.height,
+            null,
+            null,
+            hInstance,
+            null,
+        ) orelse continue;
+
+        try drawVignetteWindows(hwnd, @intCast(mon.width), @intCast(mon.height), mon.x, mon.y, config);
+    }
+
+    var msg: windows.MSG = undefined;
+    while (!should_quit.load(.monotonic)) {
+        while (windows.PeekMessageW(&msg, null, 0, 0, windows.PM_REMOVE) != 0) {
+            if (msg.message == windows.WM_DESTROY) break;
+            _ = windows.TranslateMessage(&msg);
+            _ = windows.DispatchMessageW(&msg);
         }
+        std.Thread.sleep(16 * std.time.ns_per_ms);
+    }
+}
 
-        var msg: windows.MSG = undefined;
-        while (!should_quit.load(.monotonic)) {
-            while (windows.PeekMessageW(&msg, null, 0, 0, windows.PM_REMOVE) != 0) {
-                if (msg.message == windows.WM_DESTROY) break;
-                _ = windows.TranslateMessage(&msg);
-                _ = windows.DispatchMessageW(&msg);
-            }
-            std.Thread.sleep(16 * std.time.ns_per_ms);
-        }
-    } else if (builtin.os.tag == .linux) {}
+fn calculateVignetteFactor(dx: f32, dy: f32, center_x: f32, center_y: f32, config: Config) f32 {
+    const normalized_dist = switch (config.shape) {
+        .circle => blk: {
+            const dist = @sqrt(dx * dx + dy * dy);
+            const max_dist = @sqrt(center_x * center_x + center_y * center_y);
+            break :blk dist / max_dist;
+        },
+        .rectangle => blk: {
+            const dist_x = @abs(dx) / center_x;
+            const dist_y = @abs(dy) / center_y;
+            break :blk @max(dist_x, dist_y);
+        },
+        .diamond => blk: {
+            const dist_x = @abs(dx) / center_x;
+            const dist_y = @abs(dy) / center_y;
+            break :blk (dist_x + dist_y) / 2.0;
+        },
+        .elliptical => blk: {
+            const aspect = 1.6;
+            const dist_x = dx / center_x;
+            const dist_y = dy / center_y;
+            const dist = @sqrt((dist_x * dist_x * aspect) + (dist_y * dist_y));
+            const max_dist = @sqrt(aspect + 1.0);
+            break :blk dist / max_dist;
+        },
+    };
+
+    return switch (config.falloff_type) {
+        .power => @min(1.0, std.math.pow(f32, normalized_dist, config.falloff)),
+        .exponential => blk: {
+            const exp_max = @exp(config.falloff) - 1.0;
+            break :blk (@exp(config.falloff * normalized_dist) - 1.0) / exp_max;
+        },
+        .gaussian => 1.0 - @exp(-config.falloff * normalized_dist * normalized_dist),
+        .smootherstep => blk: {
+            const t = @min(1.0, normalized_dist);
+            const smootherstep = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+            break :blk std.math.pow(f32, smootherstep, config.falloff);
+        },
+    };
 }
 
 fn drawVignetteWindows(hwnd: windows.HWND, width: u32, height: u32, xpos: i32, ypos: i32, config: Config) !void {
     const center_x = @as(f32, @floatFromInt(width)) / 2.0;
     const center_y = @as(f32, @floatFromInt(height)) / 2.0;
-    const max_dist = @max(1.0, @sqrt(center_x * center_x + center_y * center_y));
 
     const screen_dc = windows.GetDC(null) orelse return error.GetDCFailed;
     defer _ = windows.ReleaseDC(null, screen_dc);
@@ -360,8 +369,7 @@ fn drawVignetteWindows(hwnd: windows.HWND, width: u32, height: u32, xpos: i32, y
         while (x < width) : (x += 1) {
             const dx = @as(f32, @floatFromInt(x)) - center_x;
             const dy = @as(f32, @floatFromInt(y)) - center_y;
-            const dist = @sqrt(dx * dx + dy * dy);
-            const factor = @min(1.0, std.math.pow(f32, dist / max_dist, config.falloff));
+            const factor = calculateVignetteFactor(dx, dy, center_x, center_y, config);
             const alpha: u8 = @intFromFloat(factor * config.max_alpha * 255.0);
             const premul: u8 = 0;
             const bgra = (@as(u32, alpha) << 24) | (@as(u32, premul) << 16) |
@@ -396,20 +404,10 @@ fn printHelp() void {
         \\Options:
         \\  -f, --falloff <VALUE>       Fall-off power for vignette curve (default: 4.0)
         \\  -o, --opacity <VALUE>       Maximum edge opacity, 0.0-1.0 (default: 0.6)
+        \\  -s, --shape <VALUE>         Shape: circle, rectangle, diamond, elliptical (default: rectangle)
+        \\  -t, --type <VALUE>          Falloff: power, exponential, gaussian, smoothers
         \\
     , .{});
-    if (builtin.os.tag == .linux) {
-        std.debug.print(
-            \\  -x, --x11-opacity <VALUE>   X11 window opacity, 0.0-1.0 (default: 0.5)
-            \\  -h, --help                  Print this help message
-            \\
-        , .{});
-    } else {
-        std.debug.print(
-            \\  -h, --help                  Print this help message
-            \\
-        , .{});
-    }
 }
 
 fn parseArgs(allocator: std.mem.Allocator) !Config {
@@ -444,14 +442,24 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
                 std.debug.print("Error: invalid opacity value: {s}\n", .{args[i]});
                 std.process.exit(1);
             };
-        } else if (builtin.os.tag == .linux and (std.mem.eql(u8, arg, "-x") or std.mem.eql(u8, arg, "--x11-opacity"))) {
+        } else if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--shape")) {
             i += 1;
             if (i >= args.len) {
-                std.debug.print("Error: --x11-opacity requires a value\n", .{});
+                std.debug.print("Error: --shape requires a value\n", .{});
                 std.process.exit(1);
             }
-            config.x11_opacity = std.fmt.parseFloat(f32, args[i]) catch {
-                std.debug.print("Error: invalid x11-opacity value: {s}\n", .{args[i]});
+            config.shape = std.meta.stringToEnum(Shape, args[i]) orelse {
+                std.debug.print("Error: invalid shape: {s}\n", .{args[i]});
+                std.process.exit(1);
+            };
+        } else if (std.mem.eql(u8, arg, "-t") or std.mem.eql(u8, arg, "--type")) {
+            i += 1;
+            if (i >= args.len) {
+                std.debug.print("Error: --type requires a value\n", .{});
+                std.process.exit(1);
+            }
+            config.falloff_type = std.meta.stringToEnum(FalloffType, args[i]) orelse {
+                std.debug.print("Error: invalid falloff type: {s}\n", .{args[i]});
                 std.process.exit(1);
             };
         } else {
@@ -465,23 +473,18 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
 }
 
 pub fn main() !void {
+    if (builtin.os.tag != .windows) {
+        std.debug.print("This application is only supported on Windows.\n", .{});
+        std.process.exit(0);
+    }
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     const config = try parseArgs(allocator);
 
-    if (builtin.os.tag == .windows) {
-        _ = windows.SetConsoleCtrlHandler(windows.windowsCtrlHandler, 1);
-    } else if (builtin.os.tag == .linux) {
-        const act = std.posix.Sigaction{
-            .handler = .{ .handler = handleSignal },
-            .mask = std.posix.empty_sigset,
-            .flags = 0,
-        };
-        try std.posix.sigaction(std.posix.SIG.INT, &act, null);
-        try std.posix.sigaction(std.posix.SIG.TERM, &act, null);
-    }
+    _ = windows.SetConsoleCtrlHandler(windows.windowsCtrlHandler, 1);
 
     try createVignetteWindows(allocator, config);
 }
