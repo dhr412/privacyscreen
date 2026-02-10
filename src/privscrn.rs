@@ -25,19 +25,49 @@ use clap::Parser;
 #[command(name = "privscrn")]
 #[command(about = "Privacy screen vignette overlay")]
 struct Cli {
-    #[arg(short, long, default_value = "4.0")]
+    #[arg(
+        short,
+        long,
+        default_value = "4.0",
+        help = "Fall-off power for the vignette curve"
+    )]
     falloff: f32,
 
-    #[arg(short, long, default_value = "0.3")]
+    #[arg(
+        short,
+        long,
+        default_value = "0.3",
+        help = "Maximum edge opacity (0.0–1.0)"
+    )]
     opacity: f32,
 
-    #[arg(short = 's', long, default_value = "elliptical")]
+    #[arg(
+        short = 's',
+        long,
+        default_value = "elliptical",
+        help = "Vignette shape"
+    )]
     shape: Shape,
 
-    #[arg(short = 't', long, default_value = "smootherstep")]
+    #[arg(
+        short = 't',
+        long,
+        default_value = "smootherstep",
+        help = "Falloff function"
+    )]
     falloff_type: FalloffType,
-    #[arg(short = 'r', long)]
-    reverse: bool,
+
+    #[arg(short = 'l', long, default_missing_value = "0.4", num_args = 0..=1, help = "Darken the left side more (optional strength, default: 0.4)")]
+    left_bias: Option<f32>,
+    #[arg(short = 'r', long, default_missing_value = "0.4", num_args = 0..=1, help = "Darken the right side more (optional strength, default: 0.4)")]
+    right_bias: Option<f32>,
+
+    #[arg(
+        short = 'i',
+        long,
+        help = "Invert vignette (darken center instead of edges)"
+    )]
+    invert: bool,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy)]
@@ -66,7 +96,9 @@ struct App {
     max_alpha: f32,
     shape: Shape,
     falloff_type: FalloffType,
-    reverse: bool,
+    left_bias: Option<f32>,
+    right_bias: Option<f32>,
+    invert: bool,
 }
 
 impl Default for App {
@@ -79,12 +111,28 @@ impl Default for App {
             max_alpha: 0.6,
             shape: Shape::Rectangle,
             falloff_type: FalloffType::Smootherstep,
-            reverse: false,
+            left_bias: None,
+            right_bias: None,
+            invert: false,
         }
     }
 }
 
-fn calculate_vignette_factor(dx: f32, dy: f32, center_x: f32, center_y: f32, config: &App) -> f32 {
+fn calculate_vignette_factor(
+    mut dx: f32,
+    dy: f32,
+    center_x: f32,
+    center_y: f32,
+    config: &App,
+) -> f32 {
+    dx = if let Some(bias) = config.left_bias {
+        dx + center_x * bias
+    } else if let Some(bias) = config.right_bias {
+        dx - center_x * bias
+    } else {
+        dx
+    };
+
     let mut normalized_dist = match config.shape {
         Shape::Circle => {
             let dist = (dx.powi(2) + dy.powi(2)).sqrt();
@@ -111,7 +159,7 @@ fn calculate_vignette_factor(dx: f32, dy: f32, center_x: f32, center_y: f32, con
         }
     };
 
-    if config.reverse {
+    if config.invert {
         normalized_dist = 1.0 - normalized_dist;
     }
 
@@ -305,7 +353,9 @@ fn main() {
         max_alpha: cli.opacity,
         shape: cli.shape,
         falloff_type: cli.falloff_type,
-        reverse: cli.reverse,
+        left_bias: cli.left_bias,
+        right_bias: cli.right_bias,
+        invert: cli.invert,
 
         ..Default::default()
     };

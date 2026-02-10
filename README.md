@@ -9,6 +9,8 @@ A lightweight utility for Windows that applies a customizable vignette effect to
 - **Click-Through**: The overlay is completely transparent to mouse input, so it won't interfere with your workflow.
 - **Always On Top**: Stays above other windows to ensure the privacy effect is always active.
 - **Performance Focused**: Minimal CPU and memory footprint.
+- **Side Bias**: Optionally darken left or right sides more for specialized privacy needs.
+- **Invert Mode**: Reverse the vignette effect to darken from center instead of edges.
 
 ## Installation
 
@@ -50,7 +52,9 @@ Run the executable with optional flags to customize the effect:
 | `-t, --type` | The mathematical function for the fall-off | `smootherstep` | `power`, `exponential`, `gaussian`, `smootherstep` |
 | `-o, --opacity` | Maximum opacity at the edges (0.0 to 1.0) | `0.3` | Any float |
 | `-f, --falloff` | Intensity/steepness of the fall-off curve | `4.0` | Any float |
-| `-r, --reverse` | Reverse the vignette effect (darken from center instead of edges) | `false` | `true`, `false` |
+| `-l, --left-bias` | Darken the left side more (optional strength, default: 0.4) | `None` | Any float (0.0-1.0) |
+| `-r, --right-bias` | Darken the right side more (optional strength, default: 0.4) | `None` | Any float (0.0-1.0) |
+| `-i, --invert` | Reverse the vignette effect (darken from center instead of edges) | `false` | `true`, `false` |
 
 To exit the application, press `Ctrl+C` in the terminal or close the terminal window.
 

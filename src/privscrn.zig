@@ -6,7 +6,9 @@ const Config = struct {
     max_alpha: f32 = 0.3,
     shape: Shape = .elliptical,
     falloff_type: FalloffType = .smootherstep,
-    reverse: bool = false,
+    left_bias: ?f32 = null,
+    right_bias: ?f32 = null,
+    invert: bool = false,
 };
 
 const Shape = enum {
@@ -296,25 +298,33 @@ fn createVignetteWindows(allocator: std.mem.Allocator, config: Config) !void {
 }
 
 fn calculateVignetteFactor(dx: f32, dy: f32, center_x: f32, center_y: f32, config: Config) f32 {
+    const eff_dx = if (config.left_bias) |bias| blk: {
+        const multiplier = if (bias == 0.0) 0.4 else bias;
+        break :blk dx + center_x * multiplier;
+    } else if (config.right_bias) |bias| blk: {
+        const multiplier = if (bias == 0.0) 0.4 else bias;
+        break :blk dx - center_x * multiplier;
+    } else dx;
+
     var normalized_dist = switch (config.shape) {
         .circle => blk: {
-            const dist = @sqrt(dx * dx + dy * dy);
+            const dist = @sqrt(eff_dx * eff_dx + dy * dy);
             const max_dist = @sqrt(center_x * center_x + center_y * center_y);
             break :blk dist / max_dist;
         },
         .rectangle => blk: {
-            const dist_x = @abs(dx) / center_x;
+            const dist_x = @abs(eff_dx) / center_x;
             const dist_y = @abs(dy) / center_y;
             break :blk @max(dist_x, dist_y);
         },
         .diamond => blk: {
-            const dist_x = @abs(dx) / center_x;
+            const dist_x = @abs(eff_dx) / center_x;
             const dist_y = @abs(dy) / center_y;
             break :blk (dist_x + dist_y) / 2.0;
         },
         .elliptical => blk: {
             const aspect = 1.7;
-            const dist_x = dx / center_x;
+            const dist_x = eff_dx / center_x;
             const dist_y = dy / center_y;
             const dist = @sqrt((dist_x * dist_x * aspect) + (dist_y * dist_y));
             const max_dist = @sqrt(aspect + 1.0);
@@ -322,7 +332,7 @@ fn calculateVignetteFactor(dx: f32, dy: f32, center_x: f32, center_y: f32, confi
         },
     };
 
-    if (config.reverse) {
+    if (config.invert) {
         normalized_dist = 1.0 - normalized_dist;
     }
     normalized_dist = std.math.clamp(normalized_dist, 0.0, 1.0);
@@ -414,7 +424,9 @@ fn printHelp(prog_name: []const u8) void {
         \\  -o, --opacity <VALUE>       Maximum edge opacity, 0.0-1.0 (default: 0.3)
         \\  -s, --shape <VALUE>         Shape: circle, rectangle, diamond, elliptical (default: elliptical)
         \\  -t, --type <VALUE>          Falloff: power, exponential, gaussian, smoothers
-        \\  -r, --reverse               Darken from center instead of edges
+        \\  -l, --left-bias [VALUE]     Darken left side more (default: 0.4 if no value)
+        \\  -r, --right-bias [VALUE]    Darken right side more (default: 0.4 if no value)
+        \\  -i, --invert               Darken from center instead of edges
         \\
     , .{prog_name});
 }
@@ -471,8 +483,28 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
                 std.debug.print("Error: invalid falloff type: {s}\n", .{args[i]});
                 std.process.exit(1);
             };
-        } else if (std.mem.eql(u8, arg, "-r") or std.mem.eql(u8, arg, "--reverse")) {
-            config.reverse = true;
+        } else if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--left-bias")) {
+            if (i + 1 < args.len and args[i + 1][0] != '-') {
+                i += 1;
+                config.left_bias = std.fmt.parseFloat(f32, args[i]) catch {
+                    std.debug.print("Error: invalid left-bias value: {s}\n", .{args[i]});
+                    std.process.exit(1);
+                };
+            } else {
+                config.left_bias = 0.4;
+            }
+        } else if (std.mem.eql(u8, arg, "-r") or std.mem.eql(u8, arg, "--right-bias")) {
+            if (i + 1 < args.len and args[i + 1][0] != '-') {
+                i += 1;
+                config.right_bias = std.fmt.parseFloat(f32, args[i]) catch {
+                    std.debug.print("Error: invalid right-bias value: {s}\n", .{args[i]});
+                    std.process.exit(1);
+                };
+            } else {
+                config.right_bias = 0.4;
+            }
+        } else if (std.mem.eql(u8, arg, "-i") or std.mem.eql(u8, arg, "--invert")) {
+            config.invert = true;
         } else {
             std.debug.print("Error: unknown argument: {s}\n", .{arg});
             printHelp(args[0]);
