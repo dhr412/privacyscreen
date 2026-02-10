@@ -1,7 +1,9 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
+    const target = b.resolveTargetQuery(.{
+        .cpu_model = .{ .explicit = &std.Target.x86.cpu.x86_64_v3 },
+    });
     const optimize = b.standardOptimizeOption(.{});
 
     const exe = b.addExecutable(.{
