@@ -36,6 +36,8 @@ struct Cli {
 
     #[arg(short = 't', long, default_value = "smootherstep")]
     falloff_type: FalloffType,
+    #[arg(short = 'r', long)]
+    reverse: bool,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy)]
@@ -64,6 +66,7 @@ struct App {
     max_alpha: f32,
     shape: Shape,
     falloff_type: FalloffType,
+    reverse: bool,
 }
 
 impl Default for App {
@@ -76,20 +79,13 @@ impl Default for App {
             max_alpha: 0.6,
             shape: Shape::Rectangle,
             falloff_type: FalloffType::Smootherstep,
+            reverse: false,
         }
     }
 }
 
-fn calculate_vignette_factor(
-    dx: f32,
-    dy: f32,
-    center_x: f32,
-    center_y: f32,
-    shape: Shape,
-    falloff_type: FalloffType,
-    falloff: f32,
-) -> f32 {
-    let normalized_dist = match shape {
+fn calculate_vignette_factor(dx: f32, dy: f32, center_x: f32, center_y: f32, config: &App) -> f32 {
+    let mut normalized_dist = match config.shape {
         Shape::Circle => {
             let dist = (dx.powi(2) + dy.powi(2)).sqrt();
             let max_dist = (center_x.powi(2) + center_y.powi(2)).sqrt();
@@ -115,17 +111,23 @@ fn calculate_vignette_factor(
         }
     };
 
-    match falloff_type {
-        FalloffType::Power => normalized_dist.powf(falloff).min(1.0),
+    if config.reverse {
+        normalized_dist = 1.0 - normalized_dist;
+    }
+
+    normalized_dist = normalized_dist.clamp(0.0, 1.0);
+
+    match config.falloff_type {
+        FalloffType::Power => normalized_dist.powf(config.falloff).min(1.0),
         FalloffType::Exponential => {
-            let exp_max = falloff.exp() - 1.0;
-            ((falloff * normalized_dist).exp() - 1.0) / exp_max
+            let exp_max = config.falloff.exp() - 1.0;
+            ((config.falloff * normalized_dist).exp() - 1.0) / exp_max
         }
-        FalloffType::Gaussian => 1.0 - (-falloff * normalized_dist.powi(2)).exp(),
+        FalloffType::Gaussian => 1.0 - (-config.falloff * normalized_dist.powi(2)).exp(),
         FalloffType::Smootherstep => {
             let t = normalized_dist.min(1.0);
             let smootherstep = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
-            smootherstep.powf(falloff)
+            smootherstep.powf(config.falloff)
         }
     }
 }
@@ -224,15 +226,8 @@ impl ApplicationHandler for App {
                             for x in 0..width {
                                 let dx = x as f32 - center_x;
                                 let dy = y as f32 - center_y;
-                                let factor = calculate_vignette_factor(
-                                    dx,
-                                    dy,
-                                    center_x,
-                                    center_y,
-                                    self.shape,
-                                    self.falloff_type,
-                                    self.falloff,
-                                );
+                                let factor =
+                                    calculate_vignette_factor(dx, dy, center_x, center_y, self);
                                 let alpha: u8 = (factor * self.max_alpha * 255.0) as u8;
                                 let premul: u8 = 0;
                                 let bgra = ((alpha as u32) << 24)
@@ -310,6 +305,7 @@ fn main() {
         max_alpha: cli.opacity,
         shape: cli.shape,
         falloff_type: cli.falloff_type,
+        reverse: cli.reverse,
 
         ..Default::default()
     };

@@ -6,6 +6,7 @@ const Config = struct {
     max_alpha: f32 = 0.3,
     shape: Shape = .elliptical,
     falloff_type: FalloffType = .smootherstep,
+    reverse: bool = false,
 };
 
 const Shape = enum {
@@ -295,7 +296,7 @@ fn createVignetteWindows(allocator: std.mem.Allocator, config: Config) !void {
 }
 
 fn calculateVignetteFactor(dx: f32, dy: f32, center_x: f32, center_y: f32, config: Config) f32 {
-    const normalized_dist = switch (config.shape) {
+    var normalized_dist = switch (config.shape) {
         .circle => blk: {
             const dist = @sqrt(dx * dx + dy * dy);
             const max_dist = @sqrt(center_x * center_x + center_y * center_y);
@@ -320,6 +321,11 @@ fn calculateVignetteFactor(dx: f32, dy: f32, center_x: f32, center_y: f32, confi
             break :blk dist / max_dist;
         },
     };
+
+    if (config.reverse) {
+        normalized_dist = 1.0 - normalized_dist;
+    }
+    normalized_dist = std.math.clamp(normalized_dist, 0.0, 1.0);
 
     return switch (config.falloff_type) {
         .power => @min(1.0, std.math.pow(f32, normalized_dist, config.falloff)),
@@ -408,6 +414,7 @@ fn printHelp() void {
         \\  -o, --opacity <VALUE>       Maximum edge opacity, 0.0-1.0 (default: 0.3)
         \\  -s, --shape <VALUE>         Shape: circle, rectangle, diamond, elliptical (default: elliptical)
         \\  -t, --type <VALUE>          Falloff: power, exponential, gaussian, smoothers
+        \\  -r, --reverse               Darken from center instead of edges
         \\
     , .{});
 }
@@ -464,6 +471,8 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
                 std.debug.print("Error: invalid falloff type: {s}\n", .{args[i]});
                 std.process.exit(1);
             };
+        } else if (std.mem.eql(u8, arg, "-r") or std.mem.eql(u8, arg, "--reverse")) {
+            config.reverse = true;
         } else {
             std.debug.print("Error: unknown argument: {s}\n", .{arg});
             printHelp();
