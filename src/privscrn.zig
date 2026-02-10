@@ -403,11 +403,11 @@ fn handleSignal(_: c_int) callconv(.C) void {
     should_quit.store(true, .monotonic);
 }
 
-fn printHelp() void {
+fn printHelp(prog_name: []const u8) void {
     std.debug.print(
         \\Privacy screen vignette overlay
         \\
-        \\Usage: privscrn [OPTIONS]
+        \\Usage: {s} [OPTIONS]
         \\
         \\Options:
         \\  -f, --falloff <VALUE>       Fall-off power for vignette curve (default: 4.0)
@@ -416,7 +416,7 @@ fn printHelp() void {
         \\  -t, --type <VALUE>          Falloff: power, exponential, gaussian, smoothers
         \\  -r, --reverse               Darken from center instead of edges
         \\
-    , .{});
+    , .{prog_name});
 }
 
 fn parseArgs(allocator: std.mem.Allocator) !Config {
@@ -429,7 +429,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
     while (i < args.len) : (i += 1) {
         const arg = args[i];
         if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-            printHelp();
+            printHelp(args[0]);
             std.process.exit(0);
         } else if (std.mem.eql(u8, arg, "-f") or std.mem.eql(u8, arg, "--falloff")) {
             i += 1;
@@ -475,7 +475,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
             config.reverse = true;
         } else {
             std.debug.print("Error: unknown argument: {s}\n", .{arg});
-            printHelp();
+            printHelp(args[0]);
             std.process.exit(1);
         }
     }
