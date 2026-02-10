@@ -211,7 +211,7 @@ fn windowProc(hWnd: windows.HWND, uMsg: windows.UINT, wParam: windows.WPARAM, lP
 }
 
 const MonitorData = struct {
-    monitors: std.ArrayList(MonitorInfo),
+    monitors: std.ArrayListUnmanaged(MonitorInfo),
     allocator: std.mem.Allocator,
 };
 
@@ -258,7 +258,7 @@ fn createVignetteWindows(allocator: std.mem.Allocator, config: Config) !void {
     _ = windows.RegisterClassExW(&wc);
 
     var monitor_data = MonitorData{
-        .monitors = std.ArrayList(MonitorInfo).empty,
+        .monitors = std.ArrayListUnmanaged(MonitorInfo).empty,
         .allocator = allocator,
     };
     defer monitor_data.monitors.deinit(monitor_data.allocator);
