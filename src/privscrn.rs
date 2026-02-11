@@ -70,7 +70,7 @@ struct Cli {
     invert: bool,
 }
 
-#[derive(clap::ValueEnum, Clone, Copy)]
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
 #[clap(rename_all = "lowercase")]
 enum Shape {
     Circle,
@@ -79,7 +79,7 @@ enum Shape {
     Elliptical,
 }
 
-#[derive(clap::ValueEnum, Clone, Copy)]
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
 #[clap(rename_all = "lowercase")]
 enum FalloffType {
     Power,
@@ -344,7 +344,26 @@ fn main() {
 
     let cli = Cli::parse();
 
-    ctrlc::set_handler(|| std::process::exit(0)).expect("Failed to set Ctrl+C handler");
+    let mut message = format!(
+        "Running with opacity: {}, falloff power: {}, falloff function: {:?}, shape: {:?}",
+        cli.opacity, cli.falloff, cli.falloff_type, cli.shape
+    );
+    if let Some(left_bias) = cli.left_bias {
+        message.push_str(&format!(", left bias: {left_bias}"));
+    }
+    if let Some(right_bias) = cli.right_bias {
+        message.push_str(&format!(", right bias: {right_bias}"));
+    }
+    if cli.invert {
+        message.push_str(", invert: true");
+    }
+    println!("{message}");
+
+    ctrlc::set_handler(|| {
+        println!("Closing...");
+        std::process::exit(0);
+    })
+    .expect("Failed to set Ctrl+C handler");
 
     let event_loop = EventLoop::new().unwrap();
 

@@ -39,6 +39,15 @@ const windows = if (builtin.os.tag == .windows) struct {
     const L = std.unicode.utf8ToUtf16LeStringLiteral;
     const PM_REMOVE: UINT = 0x0001;
 
+    extern "kernel32" fn WaitForSingleObject(hHandle: *anyopaque, dwMilliseconds: u32) callconv(.winapi) u32;
+    extern "kernel32" fn CreateEventW(
+        lpEventAttributes: ?*anyopaque,
+        bManualReset: i32,
+        bInitialState: i32,
+        lpName: ?[*:0]const u16,
+    ) callconv(.winapi) ?*anyopaque;
+    const WAIT_TIMEOUT: u32 = 0x00000102;
+
     extern "kernel32" fn SetConsoleCtrlHandler(
         HandlerRoutine: ?*const fn (dwCtrlType: u32) callconv(.winapi) i32,
         Add: i32,
@@ -286,14 +295,9 @@ fn createVignetteWindows(allocator: std.mem.Allocator, config: Config) !void {
         try drawVignetteWindows(hwnd, @intCast(mon.width), @intCast(mon.height), mon.x, mon.y, config);
     }
 
-    var msg: windows.MSG = undefined;
+    const event = windows.CreateEventW(null, 0, 0, null) orelse return error.CreateEventFailed;
     while (!should_quit.load(.monotonic)) {
-        while (windows.PeekMessageW(&msg, null, 0, 0, windows.PM_REMOVE) != 0) {
-            if (msg.message == windows.WM_DESTROY) break;
-            _ = windows.TranslateMessage(&msg);
-            _ = windows.DispatchMessageW(&msg);
-        }
-        std.Thread.sleep(16 * std.time.ns_per_ms);
+        _ = windows.WaitForSingleObject(event, 1000);
     }
 }
 
@@ -413,8 +417,8 @@ fn handleSignal(_: c_int) callconv(.C) void {
     should_quit.store(true, .monotonic);
 }
 
-fn printHelp(prog_name: []const u8) void {
-    std.debug.print(
+fn printHelp(prog_name: []const u8) !void {
+    try stdoutPrint(
         \\Privacy screen vignette overlay
         \\
         \\Usage: {s} [OPTIONS]
@@ -441,7 +445,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
     while (i < args.len) : (i += 1) {
         const arg = args[i];
         if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-            printHelp(args[0]);
+            try printHelp(args[0]);
             std.process.exit(0);
         } else if (std.mem.eql(u8, arg, "-f") or std.mem.eql(u8, arg, "--falloff")) {
             i += 1;
@@ -507,12 +511,23 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
             config.invert = true;
         } else {
             std.debug.print("Error: unknown argument: {s}\n", .{arg});
-            printHelp(args[0]);
+            try printHelp(args[0]);
             std.process.exit(1);
         }
     }
 
     return config;
+}
+
+pub fn stdoutPrint(comptime fmt: []const u8, args: anytype) !void {
+    var buf: [512]u8 = undefined;
+
+    var stdout_writer = std.fs.File.stdout().writer(&buf);
+    const stdout = &stdout_writer.interface;
+
+    try stdout.print(fmt, args);
+
+    try stdout.flush();
 }
 
 pub fn main() !void {
@@ -527,7 +542,35 @@ pub fn main() !void {
 
     const config = try parseArgs(allocator);
 
+    var message = std.ArrayList(u8).empty;
+    defer message.deinit(allocator);
+
+    var writer = message.writer(allocator);
+
+    try message.appendSlice(allocator, "Running with opacity: ");
+    try writer.print("{d}", .{config.max_alpha});
+    try message.appendSlice(allocator, ", falloff power: ");
+    try writer.print("{d}", .{config.falloff});
+    try message.appendSlice(allocator, ", falloff function: ");
+    try message.appendSlice(allocator, @tagName(config.falloff_type));
+    try message.appendSlice(allocator, ", shape: ");
+    try message.appendSlice(allocator, @tagName(config.shape));
+    if (config.left_bias) |bias| {
+        try message.appendSlice(allocator, ", left bias: ");
+        try writer.print("{d}", .{bias});
+    }
+    if (config.right_bias) |bias| {
+        try message.appendSlice(allocator, ", right bias: ");
+        try writer.print("{d}", .{bias});
+    }
+    if (config.invert) {
+        try message.appendSlice(allocator, ", invert: true");
+    }
+    try stdoutPrint("{s}\n", .{message.items});
+
     _ = windows.SetConsoleCtrlHandler(windows.windowsCtrlHandler, 1);
 
     try createVignetteWindows(allocator, config);
+
+    try stdoutPrint("Closing...", .{});
 }
