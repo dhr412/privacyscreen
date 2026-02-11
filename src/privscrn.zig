@@ -38,6 +38,7 @@ const windows = if (builtin.os.tag == .windows) struct {
     const FALSE = std.os.windows.FALSE;
     const L = std.unicode.utf8ToUtf16LeStringLiteral;
     const PM_REMOVE: UINT = 0x0001;
+    const INFINITE: u32 = std.os.windows.INFINITE;
 
     extern "kernel32" fn WaitForSingleObject(hHandle: *anyopaque, dwMilliseconds: u32) callconv(.winapi) u32;
     extern "kernel32" fn CreateEventW(
@@ -47,6 +48,7 @@ const windows = if (builtin.os.tag == .windows) struct {
         lpName: ?[*:0]const u16,
     ) callconv(.winapi) ?*anyopaque;
     const WAIT_TIMEOUT: u32 = 0x00000102;
+    extern "kernel32" fn SetEvent(hEvent: *anyopaque) callconv(.winapi) i32;
 
     extern "kernel32" fn SetConsoleCtrlHandler(
         HandlerRoutine: ?*const fn (dwCtrlType: u32) callconv(.winapi) i32,
@@ -56,6 +58,7 @@ const windows = if (builtin.os.tag == .windows) struct {
     fn windowsCtrlHandler(dwCtrlType: u32) callconv(.winapi) i32 {
         _ = dwCtrlType;
         should_quit.store(true, .monotonic);
+        if (quit_event) |e| _ = windows.SetEvent(e);
         return 1;
     }
 
@@ -296,17 +299,16 @@ fn createVignetteWindows(allocator: std.mem.Allocator, config: Config) !void {
     }
 
     const event = windows.CreateEventW(null, 0, 0, null) orelse return error.CreateEventFailed;
-    while (!should_quit.load(.monotonic)) {
-        _ = windows.WaitForSingleObject(event, 1000);
-    }
+    quit_event = event;
+    _ = windows.WaitForSingleObject(event, windows.INFINITE);
 }
 
 fn calculateVignetteFactor(dx: f32, dy: f32, center_x: f32, center_y: f32, config: Config) f32 {
     const eff_dx = if (config.left_bias) |bias| blk: {
-        const multiplier = if (bias == 0.0) 0.4 else bias;
+        const multiplier = if (bias == 0.0) 0.2 else bias;
         break :blk dx + center_x * multiplier;
     } else if (config.right_bias) |bias| blk: {
-        const multiplier = if (bias == 0.0) 0.4 else bias;
+        const multiplier = if (bias == 0.0) 0.2 else bias;
         break :blk dx - center_x * multiplier;
     } else dx;
 
@@ -412,6 +414,7 @@ fn drawVignetteWindows(hwnd: windows.HWND, width: u32, height: u32, xpos: i32, y
 }
 
 var should_quit = std.atomic.Value(bool).init(false);
+var quit_event: ?*anyopaque = null;
 
 fn handleSignal(_: c_int) callconv(.C) void {
     should_quit.store(true, .monotonic);
@@ -428,9 +431,9 @@ fn printHelp(prog_name: []const u8) !void {
         \\  -o, --opacity <VALUE>       Maximum edge opacity, 0.0-1.0 (default: 0.3)
         \\  -s, --shape <VALUE>         Shape: circle, rectangle, diamond, elliptical (default: elliptical)
         \\  -t, --type <VALUE>          Falloff: power, exponential, gaussian, smoothers
-        \\  -l, --left-bias [VALUE]     Darken left side more (default: 0.4 if no value)
-        \\  -r, --right-bias [VALUE]    Darken right side more (default: 0.4 if no value)
-        \\  -i, --invert               Darken from center instead of edges
+        \\  -l, --left-bias [VALUE]     Darken left side more (default: 0.2 if no value)
+        \\  -r, --right-bias [VALUE]    Darken right side more (default: 0.2 if no value)
+        \\  -i, --invert                Darken from center instead of edges
         \\
     , .{prog_name});
 }
@@ -495,7 +498,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
                     std.process.exit(1);
                 };
             } else {
-                config.left_bias = 0.4;
+                config.left_bias = 0.2;
             }
         } else if (std.mem.eql(u8, arg, "-r") or std.mem.eql(u8, arg, "--right-bias")) {
             if (i + 1 < args.len and args[i + 1][0] != '-') {
@@ -505,7 +508,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
                     std.process.exit(1);
                 };
             } else {
-                config.right_bias = 0.4;
+                config.right_bias = 0.2;
             }
         } else if (std.mem.eql(u8, arg, "-i") or std.mem.eql(u8, arg, "--invert")) {
             config.invert = true;

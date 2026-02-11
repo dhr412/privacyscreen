@@ -57,9 +57,9 @@ struct Cli {
     )]
     falloff_type: FalloffType,
 
-    #[arg(short = 'l', long, default_missing_value = "0.4", num_args = 0..=1, help = "Darken the left side more (optional strength, default: 0.4)")]
+    #[arg(short = 'l', long, default_missing_value = "0.2", num_args = 0..=1, help = "Darken the left side more (optional strength, default: 0.2)")]
     left_bias: Option<f32>,
-    #[arg(short = 'r', long, default_missing_value = "0.4", num_args = 0..=1, help = "Darken the right side more (optional strength, default: 0.4)")]
+    #[arg(short = 'r', long, default_missing_value = "0.2", num_args = 0..=1, help = "Darken the right side more (optional strength, default: 0.2)")]
     right_bias: Option<f32>,
 
     #[arg(
